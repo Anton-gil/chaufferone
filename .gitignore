@@ -1,0 +1,66 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js (any folder, incl. web/.next)
+.next/
+out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Local data (SQLite, OAuth tokens, demo snapshot, imports) - contains user PII
+data/
+*.db-journal
+# Personal exports used for the demo - never commit
+*.eml
+sms-*.xml
+WhatsApp Chat*.txt
+WhatsApp Chat*.zip
+.env
+.python-version
+web/node_modules/
+
+# Python build artifacts
+*.egg-info/
+build/
+web/.next/

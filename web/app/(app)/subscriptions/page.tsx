@@ -56,7 +56,7 @@ async function load(): Promise<{ items: Obligation[]; error: string | null }> {
     const t = await api.timeline();
     return { items: t.filter(isRecurring), error: null };
   } catch (e) {
-    return { items: [], error: (e as Error).message };
+    return { items: [], error: `${(e as Error).message} (Debug URL: ${process.env.CHAUFFERONE_BACKEND_URL || "undefined"})` };
   }
 }
 

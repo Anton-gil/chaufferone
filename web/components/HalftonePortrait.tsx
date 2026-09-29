@@ -1,3 +1,5 @@
+import React from 'react';
+
 type Blob = { cx: number; cy: number; rx: number; ry: number; w: number };
 
 const SHAPE: Blob[] = [
@@ -26,7 +28,7 @@ export function HalftonePortrait() {
   const W = 480;
   const H = 640;
   const step = 8;
-  const dots: JSX.Element[] = [];
+  const dots: React.ReactNode[] = [];
 
   for (let y = 0; y < H; y += step) {
     for (let x = 0; x < W; x += step) {

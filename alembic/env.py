@@ -1,4 +1,4 @@
-"""Alembic env - wired to Sutradhar models."""
+"""Alembic env - wired to Chaufferone models."""
 
 from logging.config import fileConfig
 

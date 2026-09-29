@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-const BACKEND = process.env.SUTRADHAR_BACKEND_URL ?? "http://localhost:8000";
+const BACKEND = process.env.CHAUFFERONE_BACKEND_URL ?? "http://localhost:8000";
 
 const config: NextConfig = {
   async rewrites() {

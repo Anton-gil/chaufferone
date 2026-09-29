@@ -22,7 +22,7 @@ export type Obligation = {
 };
 
 const SERVER_BACKEND =
-  process.env.SUTRADHAR_BACKEND_URL ?? "http://127.0.0.1:8000";
+  process.env.CHAUFFERONE_BACKEND_URL ?? "http://127.0.0.1:8000";
 
 function resolve(path: string): string {
   if (typeof window !== "undefined") return path;

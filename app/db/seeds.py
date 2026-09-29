@@ -264,7 +264,7 @@ def seed_demo_obligations(db: Session, user_id: str) -> int:
             },
             resources={"inr": d.amount} if d.amount else {},
             confidence=1.0,
-            sources=[{"type": "demo_seed", "ref": "sutradhar-seed-v1"}],
+            sources=[{"type": "demo_seed", "ref": "chaufferone-seed-v1"}],
             urgency_tier="green",
         )
         db.add(ob)

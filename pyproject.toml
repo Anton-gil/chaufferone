@@ -2,7 +2,7 @@
 name = "chaufferone"
 version = "0.1.0"
 description = "The one who holds every thread of your life admin. Local-first obligation engine."
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12,<3.15"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
@@ -23,6 +23,7 @@ dependencies = [
     "lxml>=5.3",
     "python-multipart>=0.0.20",
     "networkx>=3.4",
+    "segno>=1.6",
 ]
 
 [dependency-groups]
@@ -31,6 +32,9 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
 ]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.ruff]
 line-length = 100

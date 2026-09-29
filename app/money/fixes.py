@@ -1,248 +1,73 @@
-"""Candidate fix generator for a clash.
+"""Candidate fixes for a cash clash, each verified by re-running the forecast.
 
 Kinds:
-    - defer: push a clash-contributing obligation to a later date within its flexibility_window
-    - pause_subscription: skip a zero/low-penalty subscription due between today and the clash start
-    - pull_forward: pay an obligation earlier (before a later income event) to smooth cash flow
+    defer              - move a movable payment later, but still before its deadline
+                         (due + grace - lead time) and before anything that depends on it.
+                         Skips income days so we never plan to pay on the same day money
+                         is only *expected* to land.
+    pause_mandate      - an auto-debit (UPI AutoPay / e-mandate). Only the customer can pause
+                         it (RBI E-mandate Framework 2026), in their own UPI app, before the
+                         24h pre-debit window closes. We only advise.
+    pause_subscription - skip a low-penalty, non-mandate subscription this cycle.
 
-Each fix is simulated by re-running the forecast with the change applied, scored by
-resolves_clash + resulting_min_balance - added_penalty - disruption. Return top-k.
+A fix resolves the clash only if the re-simulated forecast has no floor breach anywhere in
+the horizon. Ranked: resolves > stays out of the cushion > added penalty > disruption.
+The top-k get option ids A, B, C.
 """
 
 from __future__ import annotations
 
-import calendar
 from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Obligation, UserPreferences
+from app.clock import today as clock_today
+from app.db.models import Obligation
+from app.graph.dag import blocking_subgraph, build_graph
 from app.money.clash import detect_clashes
-from app.money.forecast import forecast_daily
-from app.schemas.money import Clash, DayPoint, DebitEntry, Fix
+from app.money.forecast import effective_date, forecast_daily, is_active
+from app.schemas.money import Clash, DayPoint, Fix
+
+OPTION_IDS = ["A", "B", "C"]
 
 
-def _min_balance_after(points: list[DayPoint]) -> float:
+def latest_allowed(o: Obligation, today: date) -> date | None:
+    """Last day this obligation can be acted on and still meet its deadline.
+
+    Overdue items (due already passed) have no due-date bound - sooner is always better.
+    """
+    if not o.due_date or o.due_date < today:
+        return None
+    return o.due_date + timedelta(days=o.flexibility_window or 0) - timedelta(
+        days=max(o.lead_time_days or 0, 0)
+    )
+
+
+def _min_balance(points: list[DayPoint]) -> float:
     return min(p.closing_balance for p in points) if points else 0.0
 
 
-def _obligations_by_id(db: Session, ids: list[str]) -> dict[str, Obligation]:
-    if not ids:
-        return {}
-    return {o.id: o for o in db.query(Obligation).filter(Obligation.id.in_(ids)).all()}
-
-
-def _horizon_obligations(db: Session, user_id: str, today: date, end: date) -> list[Obligation]:
-    return (
-        db.query(Obligation)
-        .filter(
-            Obligation.user_id == user_id,
-            Obligation.due_date.isnot(None),
-            Obligation.due_date >= today,
-            Obligation.due_date <= end,
-            Obligation.status != "resolved",
-            Obligation.amount.isnot(None),
-        )
-        .all()
-    )
-
-
-def _simulate_with_override(
-    db: Session,
-    user_id: str,
-    override: dict[str, date | None],
-    horizon_days: int,
+def _simulate(
+    db: Session, user_id: str, overrides: dict[str, date | None], horizon_days: int, today: date
 ) -> tuple[list[DayPoint], list[Clash]]:
-    """Simulate the forecast with per-obligation date overrides (None = paused/skipped)."""
-    prefs = db.get(UserPreferences, user_id)
-    if prefs is None:
-        return [], []
-    hard = float(prefs.hard_floor_inr)
-    cushion = float(prefs.soft_cushion_inr)
-    income_per = float(prefs.estimated_monthly_income_inr)
-    salary_day = prefs.salary_day_of_month
-    balance = float(prefs.starting_balance_inr)
-    today = date.today()
-    end = today + timedelta(days=horizon_days - 1)
-
-    rows = (
-        db.query(Obligation)
-        .filter(
-            Obligation.user_id == user_id,
-            Obligation.due_date.isnot(None),
-            Obligation.status != "resolved",
-            Obligation.amount.isnot(None),
-        )
-        .all()
-    )
-
-    grouped: dict[date, list[tuple[Obligation, float]]] = {}
-    for r in rows:
-        if r.id in override:
-            new_date = override[r.id]
-            if new_date is None:
-                continue
-            eff = new_date
-        else:
-            eff = r.due_date
-        if not (today <= eff <= end):
-            continue
-        amt = float(r.amount or 0)
-        if amt <= 0:
-            continue
-        grouped.setdefault(eff, []).append((r, amt))
-
-    def _is_salary(d: date) -> bool:
-        if salary_day is None:
-            return False
-        month_end = calendar.monthrange(d.year, d.month)[1]
-        return d.day == min(salary_day, month_end)
-
-    points: list[DayPoint] = []
-    cur = today
-    for _ in range(horizon_days):
-        opening = balance
-        income = income_per if _is_salary(cur) else 0.0
-        day = grouped.get(cur, [])
-        entries = [
-            DebitEntry(
-                obligation_id=o.id,
-                title=o.title,
-                amount=amt,
-                category=o.category,
-                flexibility_window_days=o.flexibility_window or 0,
-                penalty_amount=float((o.penalty or {}).get("amount") or 0),
-            )
-            for o, amt in day
-        ]
-        total_debit = sum(e.amount for e in entries)
-        closing = opening + income - total_debit
-        if closing < hard:
-            breach = "floor"; depth = hard - closing
-        elif closing < hard + cushion:
-            breach = "cushion"; depth = (hard + cushion) - closing
-        else:
-            breach = "none"; depth = 0.0
-        points.append(
-            DayPoint(
-                date=cur, opening_balance=opening, income=income,
-                debits=entries, total_debit=total_debit,
-                closing_balance=closing, breach_type=breach, breach_depth_inr=depth,
-            )
-        )
-        balance = closing
-        cur += timedelta(days=1)
-
+    points, _ = forecast_daily(db, user_id, horizon_days, today, overrides)
     return points, detect_clashes(points)
 
 
-def _next_salary_after(prefs: UserPreferences, after: date, horizon_end: date) -> date | None:
-    if not prefs.salary_day_of_month:
-        return None
-    cur = after + timedelta(days=1)
-    while cur <= horizon_end:
-        month_end = calendar.monthrange(cur.year, cur.month)[1]
-        if cur.day == min(prefs.salary_day_of_month, month_end):
-            return cur
-        cur += timedelta(days=1)
+def _score(fix: Fix, points: list[DayPoint], clashes: list[Clash]) -> None:
+    fix.resulting_min_balance_inr = _min_balance(points)
+    fix.resolves_clash = not any(c.tier == "floor" for c in clashes)
+    fix.touches_cushion = any(c.tier == "cushion" for c in clashes)
+
+
+def _expected_income_between(
+    incomes: list[Obligation], after: date, upto: date
+) -> Obligation | None:
+    for inc in sorted(incomes, key=lambda o: effective_date(o) or date.max):
+        d = effective_date(inc)
+        if d and after < d <= upto:
+            return inc
     return None
-
-
-def _defer_candidates_for_clash(
-    clash: Clash,
-    obs: dict[str, Obligation],
-    prefs: UserPreferences,
-    horizon_end: date,
-) -> list[Fix]:
-    fixes: list[Fix] = []
-    for oid in clash.obligations_involved:
-        o = obs.get(oid)
-        if not o or not o.due_date:
-            continue
-        window = o.flexibility_window or 0
-
-        if window > 0:
-            candidate_date = o.due_date + timedelta(days=window)
-            fixes.append(
-                Fix(
-                    kind="defer",
-                    obligation_id=oid,
-                    obligation_title=o.title,
-                    description=f"Defer {o.title} to {candidate_date.isoformat()} (end of {window}-day grace, no late fee)",
-                    new_date=candidate_date,
-                    added_penalty_inr=0,
-                    disruption_score=15,
-                    resolves_clash=False,
-                    resulting_min_balance_inr=0,
-                )
-            )
-            if window >= 2:
-                half = o.due_date + timedelta(days=window // 2)
-                fixes.append(
-                    Fix(
-                        kind="defer",
-                        obligation_id=oid,
-                        obligation_title=o.title,
-                        description=f"Defer {o.title} to {half.isoformat()} (halfway through grace)",
-                        new_date=half,
-                        added_penalty_inr=0,
-                        disruption_score=10,
-                        resolves_clash=False,
-                        resulting_min_balance_inr=0,
-                    )
-                )
-
-        next_sal = _next_salary_after(prefs, o.due_date, horizon_end)
-        if next_sal:
-            late_target = next_sal + timedelta(days=1)
-            penalty_amt = float((o.penalty or {}).get("amount") or 0)
-            fixes.append(
-                Fix(
-                    kind="defer",
-                    obligation_id=oid,
-                    obligation_title=o.title,
-                    description=(
-                        f"Defer {o.title} to {late_target.isoformat()} "
-                        f"(after {next_sal.isoformat()} salary; accepts Rs{penalty_amt:.0f} late fee)"
-                    ),
-                    new_date=late_target,
-                    added_penalty_inr=penalty_amt,
-                    disruption_score=25,
-                    resolves_clash=False,
-                    resulting_min_balance_inr=0,
-                )
-            )
-    return fixes
-
-
-def _pause_candidates_in_horizon(
-    horizon_obs: list[Obligation],
-    clash: Clash,
-) -> list[Fix]:
-    """Any zero/low-penalty subscription-like obligation due before clash starts frees cash."""
-    fixes: list[Fix] = []
-    for o in horizon_obs:
-        if not o.due_date or o.due_date > clash.first_breach_date:
-            continue
-        if o.obligation_type not in {"renewal", "subscription"} and o.category != "subscription":
-            continue
-        pen = float((o.penalty or {}).get("amount") or 0)
-        if pen > 200:
-            continue
-        fixes.append(
-            Fix(
-                kind="pause_subscription",
-                obligation_id=o.id,
-                obligation_title=o.title,
-                description=f"Pause {o.title} this cycle (frees Rs{float(o.amount or 0):.0f}, penalty Rs{pen:.0f})",
-                new_date=None,
-                added_penalty_inr=pen,
-                disruption_score=30,
-                resolves_clash=False,
-                resulting_min_balance_inr=0,
-            )
-        )
-    return fixes
 
 
 def propose_fixes(
@@ -252,38 +77,125 @@ def propose_fixes(
     horizon_days: int = 45,
     top_k: int = 3,
 ) -> list[Fix]:
-    today = date.today()
+    today = clock_today()
     end = today + timedelta(days=horizon_days - 1)
-    prefs = db.get(UserPreferences, user_id)
-    if prefs is None:
-        return []
-    clash_obs = _obligations_by_id(db, list(clash.obligations_involved))
-    horizon_obs = _horizon_obligations(db, user_id, today, end)
+    base_points, _ = forecast_daily(db, user_id, horizon_days, today)
+    income_days = {p.date for p in base_points if p.income > 0}
 
-    candidates = (
-        _defer_candidates_for_clash(clash, clash_obs, prefs, end)
-        + _pause_candidates_in_horizon(horizon_obs, clash)
+    active = [
+        o
+        for o in db.query(Obligation).filter(Obligation.user_id == user_id).all()
+        if is_active(o)
+    ]
+    planned = {o.id: effective_date(o) for o in active}
+    incomes = [o for o in active if o.obligation_type == "income"]
+    sub = blocking_subgraph(build_graph(db, user_id))
+
+    candidates: list[Fix] = []
+
+    # 1. Defer a movable payment to the earliest later day that clears the floor.
+    for o in active:
+        if o.obligation_type == "income" or o.auto_pay_enabled:
+            continue
+        if not o.amount or float(o.amount) <= 0:
+            continue
+        cur = planned.get(o.id)
+        if cur is None or cur < today or cur > clash.last_breach_date:
+            continue
+        latest = latest_allowed(o, today) or end
+        if o.id in sub:
+            dependents = [planned[d] for d in sub.successors(o.id) if planned.get(d)]
+            if dependents:
+                latest = min(latest, min(dependents) - timedelta(days=1))
+        d = cur + timedelta(days=1)
+        while d <= min(latest, end):
+            if d in income_days:  # never plan a payment on the day money is only expected
+                d += timedelta(days=1)
+                continue
+            points, clashes = _simulate(db, user_id, {o.id: d}, horizon_days, today)
+            if not any(c.tier == "floor" for c in clashes):
+                inc = _expected_income_between(incomes, cur, d)
+                fix = Fix(
+                    kind="defer",
+                    obligation_id=o.id,
+                    obligation_title=o.title,
+                    description=f"Pay {o.title} on {d:%a %d %b} instead of {cur:%a %d %b}"
+                    + (f", after {inc.title} lands" if inc else "")
+                    + (f" (still before the {o.due_date:%d %b} deadline)" if o.due_date else ""),
+                    old_date=cur,
+                    new_date=d,
+                    disruption_score=10,
+                    depends_on_income=inc.title if inc else None,
+                    income_date=effective_date(inc) if inc else None,
+                )
+                _score(fix, points, clashes)
+                candidates.append(fix)
+                break
+            d += timedelta(days=1)
+
+    # 2. Pause an auto-debit mandate (user action in their UPI app, 24h before the debit).
+    for o in active:
+        if not o.auto_pay_enabled or o.obligation_type == "income":
+            continue
+        cur = planned.get(o.id)
+        if cur is None or cur <= today or cur > clash.last_breach_date:
+            continue
+        deadline = cur - timedelta(days=1)
+        name = o.vendor or o.title
+        fix = Fix(
+            kind="pause_mandate",
+            obligation_id=o.id,
+            obligation_title=o.title,
+            description=(
+                f"Pause the {name} auto-debit in your UPI app before {deadline:%a %d %b} "
+                f"(saves Rs{float(o.amount or 0):,.0f} this cycle)"
+            ),
+            old_date=cur,
+            deadline=deadline,
+            disruption_score=30,
+            requires_user_action=True,
+        )
+        points, clashes = _simulate(db, user_id, {o.id: None}, horizon_days, today)
+        _score(fix, points, clashes)
+        candidates.append(fix)
+
+    # 3. Skip a low-penalty, non-mandate subscription due before the clash ends.
+    for o in active:
+        if o.auto_pay_enabled or o.obligation_type == "income":
+            continue
+        if o.category != "subscription":
+            continue
+        cur = planned.get(o.id)
+        if cur is None or cur < today or cur > clash.last_breach_date:
+            continue
+        pen = float((o.penalty or {}).get("amount") or 0)
+        if pen > 200:
+            continue
+        fix = Fix(
+            kind="pause_subscription",
+            obligation_id=o.id,
+            obligation_title=o.title,
+            description=f"Skip {o.title} this cycle (frees Rs{float(o.amount or 0):,.0f}, penalty Rs{pen:,.0f})",
+            old_date=cur,
+            added_penalty_inr=pen,
+            disruption_score=30,
+            requires_user_action=True,
+        )
+        points, clashes = _simulate(db, user_id, {o.id: None}, horizon_days, today)
+        _score(fix, points, clashes)
+        candidates.append(fix)
+
+    candidates.sort(
+        key=lambda f: (
+            not f.resolves_clash,
+            f.touches_cushion,
+            f.added_penalty_inr,
+            f.disruption_score,
+            -f.resulting_min_balance_inr,
+        )
     )
-
-    baseline_points, _ = forecast_daily(db, user_id, horizon_days=horizon_days)
-    baseline_min = _min_balance_after(baseline_points)
-
-    scored: list[tuple[float, Fix]] = []
-    for fix in candidates:
-        override: dict[str, date | None] = {fix.obligation_id: fix.new_date}
-        points, new_clashes = _simulate_with_override(db, user_id, override, horizon_days)
-        new_min = _min_balance_after(points)
-        fix.resulting_min_balance_inr = new_min
-        # Honest: a fix truly resolves the clash iff the resulting forecast has NO floor breach.
-        fix.resolves_clash = not any(c.tier == "floor" for c in new_clashes)
-
-        score = 100.0
-        score -= min((new_min - baseline_min) / 100.0, 200)  # bigger balance improvement = better
-        if fix.resolves_clash:
-            score -= 80
-        score += fix.added_penalty_inr / 100
-        score += fix.disruption_score
-        scored.append((score, fix))
-
-    scored.sort(key=lambda t: t[0])
-    return [f for _, f in scored[:top_k]]
+    resolving = [f for f in candidates if f.resolves_clash]
+    top = (resolving or candidates)[:top_k]
+    for fix, oid in zip(top, OPTION_IDS, strict=False):
+        fix.id = oid
+    return top

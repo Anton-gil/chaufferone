@@ -22,6 +22,7 @@ class DayPoint(BaseModel):
     opening_balance: float
     income: float
     debits: list[DebitEntry]
+    credits: list[DebitEntry] = []  # expected one-off income (e.g. freelance), salary excluded
     total_debit: float
     closing_balance: float
     breach_type: Literal["none", "cushion", "floor"] = "none"
@@ -39,15 +40,22 @@ class Clash(BaseModel):
 
 
 class Fix(BaseModel):
-    kind: Literal["defer", "pause_subscription", "reorder"]
+    id: str | None = None          # "A", "B", "C" after ranking
+    kind: Literal["defer", "pause_subscription", "pause_mandate", "reorder"]
     obligation_id: str
     obligation_title: str
     description: str
+    old_date: date | None = None
     new_date: date | None = None
-    added_penalty_inr: float
-    disruption_score: int          # 0-100, subjective (defer within window = low; pause active sub = higher)
-    resolves_clash: bool
-    resulting_min_balance_inr: float
+    deadline: date | None = None   # pause_mandate: last day to act (24h before the debit)
+    added_penalty_inr: float = 0
+    disruption_score: int = 0      # 0-100, subjective (defer within window = low; pause active sub = higher)
+    resolves_clash: bool = False
+    touches_cushion: bool = False
+    resulting_min_balance_inr: float = 0
+    depends_on_income: str | None = None  # title of an *expected* income the fix relies on
+    income_date: date | None = None
+    requires_user_action: bool = False    # e.g. pausing a mandate happens in the user's UPI app
 
 
 class ForecastResponse(BaseModel):

@@ -1,9 +1,12 @@
 """45-day daily balance forecast.
 
-balance[d+1] = balance[d] + income[d] - sum(planned_debits[d])
+balance[d+1] = balance[d] + income[d] - sum(debits[d])
 
-Income: monthly salary/allowance on prefs.salary_day_of_month.
-Debits: obligations with due_date in window and status != resolved.
+Income: the monthly allowance/salary on prefs.salary_day_of_month, plus any
+obligation_type="income" rows (e.g. an expected freelance payment).
+Debits: every active obligation with an amount, on its planned_on date (falls
+back to due_date). `overrides` lets the fix search and the consent loop simulate
+moving ({id: date}) or pausing ({id: None}) obligations without touching the DB.
 """
 
 from __future__ import annotations
@@ -13,8 +16,19 @@ from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
+from app.clock import today as clock_today
 from app.db.models import Obligation, UserPreferences
 from app.schemas.money import DayPoint, DebitEntry
+
+INACTIVE_STATUSES = {"resolved", "paid", "verified", "paused", "pause_requested", "dismissed"}
+
+
+def is_active(o: Obligation) -> bool:
+    return (o.status or "upcoming") not in INACTIVE_STATUSES
+
+
+def effective_date(o: Obligation) -> date | None:
+    return o.planned_on or o.due_date
 
 
 def _get_or_default_prefs(db: Session, user_id: str) -> UserPreferences:
@@ -38,42 +52,49 @@ def _salary_day_for(d: date, target_day: int | None) -> bool:
     return d.day == min(target_day, _month_end_day(d))
 
 
-def _debits_on(
-    db: Session,
-    user_id: str,
-    start: date,
-    end: date,
-) -> dict[date, list[Obligation]]:
-    rows = (
-        db.query(Obligation)
-        .filter(
-            Obligation.user_id == user_id,
-            Obligation.due_date.isnot(None),
-            Obligation.due_date >= start,
-            Obligation.due_date <= end,
-            Obligation.status != "resolved",
-            Obligation.amount.isnot(None),
-        )
-        .all()
-    )
-    grouped: dict[date, list[Obligation]] = {}
-    for r in rows:
-        if float(r.amount or 0) <= 0:
-            continue
-        grouped.setdefault(r.due_date, []).append(r)
-    return grouped
-
-
-def _debit_entry(o: Obligation) -> DebitEntry:
+def _entry(o: Obligation, amount: float) -> DebitEntry:
     p = o.penalty or {}
     return DebitEntry(
         obligation_id=o.id,
         title=o.title,
-        amount=float(o.amount or 0),
+        amount=amount,
         category=o.category,
         flexibility_window_days=o.flexibility_window or 0,
         penalty_amount=float(p.get("amount") or 0),
     )
+
+
+def _cash_events(
+    db: Session,
+    user_id: str,
+    start: date,
+    end: date,
+    overrides: dict[str, date | None],
+) -> tuple[dict[date, list[DebitEntry]], dict[date, list[DebitEntry]]]:
+    rows = (
+        db.query(Obligation)
+        .filter(Obligation.user_id == user_id, Obligation.amount.isnot(None))
+        .all()
+    )
+    debits: dict[date, list[DebitEntry]] = {}
+    credits: dict[date, list[DebitEntry]] = {}
+    for r in rows:
+        if not is_active(r):
+            continue
+        amount = float(r.amount or 0)
+        if amount <= 0:
+            continue
+        if r.id in overrides:
+            eff = overrides[r.id]
+            if eff is None:
+                continue
+        else:
+            eff = effective_date(r)
+        if eff is None or not (start <= eff <= end):
+            continue
+        bucket = credits if r.obligation_type == "income" else debits
+        bucket.setdefault(eff, []).append(_entry(r, amount))
+    return debits, credits
 
 
 def forecast_daily(
@@ -81,11 +102,12 @@ def forecast_daily(
     user_id: str,
     horizon_days: int = 45,
     today: date | None = None,
+    overrides: dict[str, date | None] | None = None,
 ) -> tuple[list[DayPoint], UserPreferences]:
-    today = today or date.today()
+    today = today or clock_today()
     prefs = _get_or_default_prefs(db, user_id)
     end = today + timedelta(days=horizon_days - 1)
-    debits = _debits_on(db, user_id, today, end)
+    debits, credits = _cash_events(db, user_id, today, end, overrides or {})
 
     hard = float(prefs.hard_floor_inr)
     cushion = float(prefs.soft_cushion_inr)
@@ -97,9 +119,11 @@ def forecast_daily(
     cur = today
     for _ in range(horizon_days):
         opening = balance
-        income = income_per if _salary_day_for(cur, salary_day) else 0.0
-        day_debits = debits.get(cur, [])
-        entries = [_debit_entry(o) for o in day_debits]
+        day_credits = credits.get(cur, [])
+        income = (income_per if _salary_day_for(cur, salary_day) else 0.0) + sum(
+            c.amount for c in day_credits
+        )
+        entries = debits.get(cur, [])
         total_debit = sum(e.amount for e in entries)
         closing = opening + income - total_debit
 
@@ -119,6 +143,7 @@ def forecast_daily(
                 opening_balance=opening,
                 income=income,
                 debits=entries,
+                credits=day_credits,
                 total_debit=total_debit,
                 closing_balance=closing,
                 breach_type=breach,

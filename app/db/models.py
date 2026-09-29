@@ -42,6 +42,11 @@ class Obligation(Base):
     amount_confidence: Mapped[float | None] = mapped_column(Numeric(4, 3))
 
     due_date: Mapped[date | None] = mapped_column(Date, index=True)
+    # The day the engine plans to act/pay (just-in-time before due). Consent can move it;
+    # plan_locked=True means the user chose this date, so replanning must not overwrite it.
+    planned_on: Mapped[date | None] = mapped_column(Date, index=True)
+    plan_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    payee: Mapped[str | None] = mapped_column(String)  # VPA or name, for UPI QR + debit matching
     lead_time_days: Mapped[int] = mapped_column(Integer, default=0)
     flexibility_window: Mapped[int] = mapped_column(Integer, default=0)
     recurrence: Mapped[dict[str, Any] | None] = mapped_column(JSON)
@@ -177,6 +182,23 @@ class UserPreferences(Base):
         JSON,
         default=lambda: {"gmail": True, "sms": True, "whatsapp": False, "pdf": True},
     )
+
+
+class ConsentLog(Base):
+    """Audit trail: what the engine proposed, exactly what the user said, what changed."""
+
+    __tablename__ = "consent_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    proposal_id: Mapped[str | None] = mapped_column(String, index=True)
+    spoken_proposal: Mapped[str | None] = mapped_column(Text)
+    utterance: Mapped[str] = mapped_column(Text, nullable=False)
+    intent: Mapped[str] = mapped_column(String, nullable=False)
+    parsed_by: Mapped[str] = mapped_column(String, default="rules")  # rules | llm
+    applied_moves: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    reply: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class Document(Base):

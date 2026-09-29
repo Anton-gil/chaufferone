@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.db.models import DependencyTemplate, Obligation
+from app.clock import today as clock_today
+from app.config import settings
+from app.db.models import (
+    ConsentLog,
+    DependencyTemplate,
+    Obligation,
+    PrerequisiteEdge,
+    ProcessedSignal,
+    UserPreferences,
+)
 
 TEMPLATES = [
     {
@@ -229,7 +238,7 @@ def seed_demo_obligations(db: Session, user_id: str) -> int:
         (o.user_id, o.title, o.vendor)
         for o in db.query(Obligation).filter(Obligation.user_id == user_id).all()
     }
-    today = date.today()
+    today = clock_today()
     for d in DEMO_OBLIGATIONS:
         key = (user_id, d.title, d.vendor)
         if key in existing_keys:
@@ -286,3 +295,192 @@ def seed_demo_preferences(db: Session, user_id: str) -> bool:
     db.add(prefs)
     db.commit()
     return True
+
+
+# --------------------------------------------------------------------------------------
+# handoff-v2 §6 hero scenario: persona "Arun", a tight month. Fictional companies only.
+# Numbers are pinned by tests/test_scenario.py (properties, not rupees).
+# --------------------------------------------------------------------------------------
+
+SCENARIO_PREFS = {
+    "hard_floor_inr": 1000,
+    "soft_cushion_inr": 1000,
+    "starting_balance_inr": 2500,
+    "estimated_monthly_income_inr": 10000,  # allowance on the 1st
+    "salary_day_of_month": 1,
+}
+
+
+@dataclass
+class ScenarioOb:
+    key: str
+    title: str
+    vendor: str
+    category: str
+    obligation_type: str
+    days_from_today: int
+    amount: float | None
+    penalty: dict[str, Any]
+    source_label: str
+    source_type: str
+    lead_time_days: int = 0
+    confidence: float = 0.95
+    payee: str | None = None
+
+
+def _scenario() -> list[ScenarioOb]:
+    teammate_vpa = settings.upi_payee_vpa or "demo.teammate@okaxis"
+    return [
+        ScenarioOb(
+            key="rent",
+            title="Hostel rent — October",
+            vendor="Anna Nagar PG",
+            category="rent",
+            obligation_type="payment",
+            days_from_today=5,
+            amount=7800,
+            penalty={"type": "late_fee", "amount": 500, "description": "₹500 late fee after the 5th"},
+            source_label="WhatsApp: PG owner's reminder",
+            source_type="whatsapp",
+        ),
+        ScenarioOb(
+            key="gift",
+            title="Priya's birthday gift contribution",
+            vendor="Priya bday gift pool",
+            category="social",
+            obligation_type="payment",
+            days_from_today=8,
+            amount=500,
+            penalty={"type": "none", "amount": 0, "description": "Social: the group buys the gift on the 8th"},
+            source_label="WhatsApp: class group, 'send ₹500 by Thursday'",
+            source_type="whatsapp",
+            confidence=0.8,
+            payee=teammate_vpa,
+        ),
+        ScenarioOb(
+            key="puc",
+            title="PUC certificate for scooter",
+            vendor="Emission test centre",
+            category="puc_certificate",
+            obligation_type="document",
+            days_from_today=-10,  # expired 10 days ago
+            amount=100,
+            penalty={
+                "type": "legal",
+                "amount": 10000,
+                "description": "Riding without a valid PUC: up to ₹10,000 fine (MV Act s.190(2))",
+            },
+            source_label="Vehicle profile (PUC expiry entered at onboarding)",
+            source_type="manual",
+            lead_time_days=1,
+            confidence=1.0,
+        ),
+        ScenarioOb(
+            key="insurance",
+            title="Two-wheeler insurance renewal",
+            vendor="SafeRide General Insurance",
+            category="motor_insurance_renewal",
+            obligation_type="renewal",
+            days_from_today=18,
+            amount=1850,
+            penalty={
+                "type": "legal",
+                "amount": 2000,
+                "description": "Riding uninsured risks a fine; no-claim bonus is lost after a 90-day lapse",
+            },
+            source_label="Email: SafeRide renewal notice",
+            source_type="email",
+            lead_time_days=1,
+        ),
+        ScenarioOb(
+            key="freelance",
+            title="Freelance payment — logo project",
+            vendor="Kavi Studio",
+            category="income",
+            obligation_type="income",
+            days_from_today=16,
+            amount=3000,
+            penalty={"type": "none", "amount": 0, "description": "Expected income (invoice #0412)"},
+            source_label="Email: invoice #0412, 'payment by the 16th'",
+            source_type="email",
+            confidence=0.85,
+        ),
+        ScenarioOb(
+            key="lab",
+            title="DBMS lab record submission",
+            vendor="College",
+            category="education",
+            obligation_type="task",
+            days_from_today=12,
+            amount=None,
+            penalty={"type": "none", "amount": 0, "description": "Internal marks"},
+            source_label="Email: college LMS notification",
+            source_type="email",
+            lead_time_days=2,
+        ),
+    ]
+
+
+def clear_user_data(db: Session, user_id: str) -> dict[str, int]:
+    ids = [o.id for o in db.query(Obligation.id).filter(Obligation.user_id == user_id).all()]
+    edges = 0
+    if ids:
+        edges = (
+            db.query(PrerequisiteEdge)
+            .filter(
+                (PrerequisiteEdge.obligation_id.in_(ids)) | (PrerequisiteEdge.prerequisite_id.in_(ids))
+            )
+            .delete(synchronize_session=False)
+        )
+    signals = db.query(ProcessedSignal).filter(ProcessedSignal.user_id == user_id).delete()
+    consents = db.query(ConsentLog).filter(ConsentLog.user_id == user_id).delete()
+    obs = db.query(Obligation).filter(Obligation.user_id == user_id).delete()
+    db.commit()
+    return {"obligations": obs, "edges": edges, "signals": signals, "consents": consents}
+
+
+def seed_scenario(db: Session, user_id: str) -> dict[str, object]:
+    """Wipe this user's data and load the §6 hero scenario. Idempotent."""
+    cleared = clear_user_data(db, user_id)
+    prefs = db.get(UserPreferences, user_id)
+    if prefs is None:
+        prefs = UserPreferences(user_id=user_id)
+        db.add(prefs)
+    for k, v in SCENARIO_PREFS.items():
+        setattr(prefs, k, v)
+
+    today = clock_today()
+    ids: dict[str, str] = {}
+    for s in _scenario():
+        oid = str(uuid.uuid4())
+        ids[s.key] = oid
+        db.add(
+            Obligation(
+                id=oid,
+                user_id=user_id,
+                title=s.title,
+                vendor=s.vendor,
+                vendor_normalized=s.vendor.lower().strip(),
+                category=s.category,
+                obligation_type=s.obligation_type,
+                amount=s.amount,
+                currency="INR",
+                amount_confidence=1.0 if s.amount else None,
+                due_date=today + timedelta(days=s.days_from_today),
+                lead_time_days=s.lead_time_days,
+                penalty=s.penalty,
+                resources={"inr": s.amount} if s.amount else {},
+                confidence=s.confidence,
+                payee=s.payee,
+                sources=[{"type": s.source_type, "ref": f"scenario:{s.key}", "label": s.source_label}],
+                urgency_tier="green",
+            )
+        )
+    db.commit()
+
+    from app.graph.linker import auto_link_prerequisites
+    from app.planner import plan_dates
+
+    edges = auto_link_prerequisites(db, user_id)
+    planned = plan_dates(db, user_id)
+    return {"cleared": cleared, "obligations": len(ids), "edges": edges, "planned": planned, "ids": ids}

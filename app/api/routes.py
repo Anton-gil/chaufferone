@@ -34,7 +34,7 @@ router = APIRouter()
 
 @router.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "product": "sutradhar"}
+    return {"status": "ok", "product": "chaufferone"}
 
 
 # --- Auth ---
@@ -406,8 +406,8 @@ def demo_seed(db: Session = Depends(get_db)) -> dict[str, object]:
     return {"obligations_added": added, "edges_added": edges, "preferences_seeded": prefs_seeded}
 
 
-@router.post("/api/demo/reset")
-def demo_reset(db: Session = Depends(get_db)) -> dict[str, int]:
+@router.post("/api/demo/clear")
+def demo_clear(db: Session = Depends(get_db)) -> dict[str, int]:
     ob_deleted = db.query(Obligation).filter(Obligation.user_id == settings.default_user_id).delete()
     edge_deleted = db.query(PrerequisiteEdge).delete()
     db.commit()

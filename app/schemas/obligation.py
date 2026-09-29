@@ -48,6 +48,10 @@ class ObligationOut(BaseModel):
     amount: float | None
     currency: str
     due_date: date | None
+    planned_on: date | None = None
+    plan_locked: bool = False
+    payee: str | None = None
+    auto_pay_enabled: bool = False
     lead_time_days: int
     penalty: dict[str, Any]
     risk_score: int

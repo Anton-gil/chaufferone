@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,6 +27,19 @@ class Settings(BaseSettings):
     ]
 
     default_user_id: str = "00000000-0000-0000-0000-000000000001"
+
+    # Demo controls (handoff-v2 §6/§8)
+    demo_today: date | None = None  # DEMO_TODAY=2026-09-30 pins the engine clock
+    demo_senders: list[str] = []  # DEMO_SENDERS='["+919876543210"]' treated as bank senders
+    demo_snapshot_path: str = str(ROOT / "data" / "demo_snapshot.db")
+
+    # Voice consent: rules first, hosted LLM only as fallback (the labelled switch)
+    voice_llm_enabled: bool = True
+    anthropic_voice_model: str = "claude-haiku-4-5-20251001"
+
+    # UPI P2P QR payee for the demo (a teammate's VPA)
+    upi_payee_vpa: str = ""
+    upi_payee_name: str = "Chaufferone Demo"
 
 
 settings = Settings()

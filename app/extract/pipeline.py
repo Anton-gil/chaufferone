@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Obligation, ProcessedSignal
 from app.extract import llm, regex_rules
 from app.extract.dedup import find_duplicate, normalize_vendor
+from app.extract.signals import handle_signal
 from app.schemas.obligation import ExtractedObligation
 
 
@@ -90,6 +91,7 @@ def process_message(
     body: str,
     subject: str | None = None,
     received_at: date | None = None,
+    sender: str | None = None,
 ) -> ProcessResult:
     if _already_seen(db, user_id, source_type, source_ref):
         return ProcessResult(None, False, "already_processed", 0.0)
@@ -98,9 +100,16 @@ def process_message(
 
     fast = regex_rules.try_fast_extract(full_text)
     if fast and fast.get("signal_type"):
-        _record_signal(db, user_id, source_type, source_ref, None, full_text)
+        # Bank signals (pre-debit notice, debit, credit) drive the plan and the verify loop.
+        ob_id, outcome = handle_signal(
+            db, user_id, fast, source_type=source_type, source_ref=source_ref, received_at=received_at
+        )
+        _record_signal(db, user_id, source_type, source_ref, ob_id, full_text)
         db.commit()
-        return ProcessResult(None, False, f"signal:{fast['signal_type']}", fast.get("confidence", 0))
+        return ProcessResult(
+            ob_id, outcome.endswith("_created"), f"signal:{fast['signal_type']}:{outcome}",
+            fast.get("confidence", 0),
+        )
 
     triage = llm.triage(full_text)
     if not triage.is_obligation or triage.confidence < 0.5:

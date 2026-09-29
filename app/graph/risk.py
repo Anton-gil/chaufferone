@@ -11,6 +11,7 @@ from datetime import date, timedelta
 
 import networkx as nx
 
+from app.clock import today as clock_today
 from app.graph.dag import blocking_subgraph
 from app.graph.scheduler import compute_start_by
 
@@ -128,7 +129,7 @@ def compute_risk(
     vendor_miss_rate: float = 0,
     cascade_exposure_inr: float | None = None,
 ) -> RiskBreakdown:
-    today = today or date.today()
+    today = today or clock_today()
     node = g.nodes[obligation_id]["data"]
     start_by = compute_start_by(g, obligation_id)
 

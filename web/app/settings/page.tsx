@@ -42,41 +42,7 @@ function toPayload(f: FormState): PreferencesUpdate {
   };
 }
 
-const fieldStyle: React.CSSProperties = {
-  background: "#0e0e13",
-  color: "#e8e8ec",
-  border: "1px solid #23232c",
-  borderRadius: 6,
-  padding: "8px 10px",
-  fontSize: 14,
-  width: "100%",
-};
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  fontSize: 12,
-  color: "#8a8a94",
-  marginBottom: 4,
-};
-
-const btnPrimary: React.CSSProperties = {
-  background: "#7ee29a",
-  color: "#0b0b0e",
-  border: 0,
-  borderRadius: 6,
-  padding: "8px 14px",
-  fontSize: 13,
-  fontWeight: 600,
-  cursor: "pointer",
-};
-const btnGhost: React.CSSProperties = {
-  background: "transparent",
-  color: "#c8c8d0",
-  border: "1px solid #23232c",
-  borderRadius: 6,
-  padding: "8px 14px",
-  fontSize: 13,
-  cursor: "pointer",
-};
+// Styles come from globals.css (.field, .field-label, .btn-primary, .btn-outline).
 
 export default function SettingsPage() {
   const [form, setForm] = useState<FormState | null>(null);
@@ -161,95 +127,102 @@ export default function SettingsPage() {
   }
 
   return (
-    <main style={{ maxWidth: 900 }}>
-      <h1>Settings</h1>
-      <p className="muted">Preferences, data sources, and demo tools.</p>
+    <main style={{ maxWidth: 960, padding: 0 }}>
+      <div className="eyebrow" style={{ marginBottom: 12 }}>System</div>
+      <h1>Settings.</h1>
+      <p className="muted" style={{ marginTop: 8 }}>Preferences, data sources, and demo tools.</p>
 
       <h2>Preferences</h2>
       {loadError ? <div className="error">{loadError}</div> : null}
       {!form && !loadError ? <p className="muted">Loading…</p> : null}
       {form ? (
         <form onSubmit={save}>
-          <div className="card">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="card" style={{ padding: 24 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
               <div>
-                <label style={labelStyle}>Starting balance (INR)</label>
-                <input style={fieldStyle} type="number" value={form.starting_balance_inr} onChange={(e) => set("starting_balance_inr", e.target.value)} />
+                <label className="field-label">Starting balance (INR)</label>
+                <input className="field" type="number" value={form.starting_balance_inr} onChange={(e) => set("starting_balance_inr", e.target.value)} />
               </div>
               <div>
-                <label style={labelStyle}>Est. monthly income (INR)</label>
-                <input style={fieldStyle} type="number" value={form.estimated_monthly_income_inr} onChange={(e) => set("estimated_monthly_income_inr", e.target.value)} />
+                <label className="field-label">Est. monthly income (INR)</label>
+                <input className="field" type="number" value={form.estimated_monthly_income_inr} onChange={(e) => set("estimated_monthly_income_inr", e.target.value)} />
               </div>
               <div>
-                <label style={labelStyle}>Hard floor (INR)</label>
-                <input style={fieldStyle} type="number" value={form.hard_floor_inr} onChange={(e) => set("hard_floor_inr", e.target.value)} />
+                <label className="field-label">Hard floor (INR)</label>
+                <input className="field" type="number" value={form.hard_floor_inr} onChange={(e) => set("hard_floor_inr", e.target.value)} />
               </div>
               <div>
-                <label style={labelStyle}>Soft cushion (INR)</label>
-                <input style={fieldStyle} type="number" value={form.soft_cushion_inr} onChange={(e) => set("soft_cushion_inr", e.target.value)} />
+                <label className="field-label">Soft cushion (INR)</label>
+                <input className="field" type="number" value={form.soft_cushion_inr} onChange={(e) => set("soft_cushion_inr", e.target.value)} />
               </div>
               <div>
-                <label style={labelStyle}>Salary day of month (1-31, blank = none)</label>
-                <input style={fieldStyle} type="number" min={1} max={31} value={form.salary_day_of_month} onChange={(e) => set("salary_day_of_month", e.target.value)} />
+                <label className="field-label">Salary day of month</label>
+                <input className="field" type="number" min={1} max={31} placeholder="1–31, blank = none" value={form.salary_day_of_month} onChange={(e) => set("salary_day_of_month", e.target.value)} />
               </div>
               <div>
-                <label style={labelStyle}>Admin day offset (days after payday)</label>
-                <input style={fieldStyle} type="number" min={0} value={form.admin_day_offset} onChange={(e) => set("admin_day_offset", e.target.value)} />
+                <label className="field-label">Admin day offset</label>
+                <input className="field" type="number" min={0} value={form.admin_day_offset} onChange={(e) => set("admin_day_offset", e.target.value)} />
               </div>
               <div>
-                <label style={labelStyle}>Aggressiveness</label>
-                <select style={fieldStyle} value={form.aggressiveness} onChange={(e) => set("aggressiveness", e.target.value)}>
-                  <option value="conservative">conservative</option>
-                  <option value="balanced">balanced</option>
-                  <option value="aggressive">aggressive</option>
+                <label className="field-label">Aggressiveness</label>
+                <select className="field" value={form.aggressiveness} onChange={(e) => set("aggressiveness", e.target.value)}>
+                  <option value="conservative">Conservative</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="aggressive">Aggressive</option>
                 </select>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <input id="voice" type="checkbox" checked={form.voice_enabled} onChange={(e) => set("voice_enabled", e.target.checked)} />
-                <label htmlFor="voice" style={{ fontSize: 13 }}>Voice enabled</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, alignSelf: "end", paddingBottom: 8 }}>
+                <input id="voice" type="checkbox" checked={form.voice_enabled} onChange={(e) => set("voice_enabled", e.target.checked)} style={{ width: 18, height: 18, accentColor: "var(--ink)" }} />
+                <label htmlFor="voice" style={{ fontSize: 13, color: "var(--ink)" }}>Voice enabled</label>
               </div>
             </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
-            <button type="submit" disabled={saving} style={btnPrimary}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16 }}>
+            <button type="submit" disabled={saving} className="btn-primary">
               {saving ? "Saving…" : "Save preferences"}
             </button>
-            {savedAt ? <span className="muted">Saved.</span> : null}
+            {savedAt ? <span className="status green">Saved</span> : null}
             {saveError ? <span className="error">{saveError}</span> : null}
           </div>
         </form>
       ) : null}
 
       <h2>Gmail</h2>
-      <div className="card">
+      <div className="card" style={{ padding: 24 }}>
         <p className="muted" style={{ marginTop: 0 }}>
           Connect your inbox so Chaufferone can extract obligations. OAuth only, read-only scope.
         </p>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <a href="/api/auth/google/start" style={{ ...btnGhost, textDecoration: "none", display: "inline-block" }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
+          <a href="/api/auth/google/start" className="btn-outline">
             Connect Gmail
           </a>
-          <button type="button" onClick={runIngest} disabled={running !== null} style={btnPrimary}>
+          <button type="button" onClick={runIngest} disabled={running !== null} className="btn-primary">
             {running === "ingest" ? "Scanning…" : "Scan inbox now"}
           </button>
         </div>
       </div>
 
-      <h2>Demo data</h2>
-      <div className="card">
+      <h2>Demo Data</h2>
+      <div className="card" style={{ padding: 24 }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button type="button" onClick={runSeed} disabled={running !== null} style={btnGhost}>
+          <button type="button" onClick={runSeed} disabled={running !== null} className="btn-outline">
             {running === "seed" ? "Seeding…" : "Seed demo obligations"}
           </button>
-          <button type="button" onClick={runReset} disabled={running !== null} style={{ ...btnGhost, color: "#ff8a95", borderColor: "#3a1a1f" }}>
+          <button
+            type="button"
+            onClick={runReset}
+            disabled={running !== null}
+            className="btn-outline"
+            style={{ color: "var(--red)", borderColor: "rgba(214,69,69,0.35)" }}
+          >
             {running === "reset" ? "Deleting…" : "Reset (delete all)"}
           </button>
         </div>
       </div>
 
-      {message ? <p className="muted" style={{ marginTop: 12 }}>{message}</p> : null}
-      {actionError ? <p className="error" style={{ marginTop: 12 }}>{actionError}</p> : null}
+      {message ? <p className="muted" style={{ marginTop: 14 }}>{message}</p> : null}
+      {actionError ? <p className="error" style={{ marginTop: 14 }}>{actionError}</p> : null}
     </main>
   );
 }

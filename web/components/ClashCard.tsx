@@ -22,15 +22,7 @@ function kindLabel(k: string): string {
   return map[k] ?? k;
 }
 
-const btnGhost: React.CSSProperties = {
-  background: "transparent",
-  color: "#c8c8d0",
-  border: "1px solid #23232c",
-  borderRadius: 6,
-  padding: "6px 10px",
-  fontSize: 12,
-  cursor: "pointer",
-};
+// Uses .btn-ghost from design system.
 
 export function ClashCard({ clash, days }: { clash: Clash; days: number }) {
   const [open, setOpen] = useState(false);
@@ -75,14 +67,14 @@ export function ClashCard({ clash, days }: { clash: Clash; days: number }) {
       </div>
 
       <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <button type="button" onClick={toggle} style={btnGhost}>
-          {open ? "Hide fixes" : "Suggested fixes"}
+        <button type="button" onClick={toggle} className="btn-ghost">
+          {open ? "Hide fixes" : "Suggested fixes →"}
         </button>
         {clash.obligations_involved.map((id, i) => (
           <Link
             key={id}
             href={`/obligation/${id}`}
-            style={{ color: "#7ee29a", fontSize: 12, marginRight: 6 }}
+            style={{ color: "var(--ink)", fontSize: 12, borderBottom: "1px solid var(--line-2)", paddingBottom: 1 }}
           >
             {clash.obligation_titles[i] ?? "view"} →
           </Link>
@@ -90,7 +82,7 @@ export function ClashCard({ clash, days }: { clash: Clash; days: number }) {
       </div>
 
       {open ? (
-        <div style={{ marginTop: 12, borderTop: "1px solid #23232c", paddingTop: 10 }}>
+        <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
           {loading ? <p className="muted" style={{ fontSize: 12 }}>Loading…</p> : null}
           {error ? <p className="error" style={{ fontSize: 12 }}>{error}</p> : null}
           {fixes && fixes.length === 0 ? (
@@ -100,24 +92,27 @@ export function ClashCard({ clash, days }: { clash: Clash; days: number }) {
             <div
               key={`${f.obligation_id}-${f.kind}-${i}`}
               style={{
-                border: "1px solid #23232c",
-                borderRadius: 8,
-                padding: "10px 12px",
+                border: "1px solid var(--line)",
+                borderRadius: 12,
+                padding: "12px 14px",
                 marginBottom: 8,
-                background: "#0e0e13",
+                background: "var(--paper-2)",
               }}
             >
               <div className="row">
-                <span style={{ fontSize: 13, fontWeight: 500 }}>
+                <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>
                   <span
                     style={{
                       display: "inline-block",
-                      background: "#23232c",
-                      color: "#c8c8d0",
-                      padding: "2px 8px",
+                      background: "var(--ink)",
+                      color: "var(--text-inv)",
+                      padding: "2px 10px",
                       borderRadius: 999,
-                      fontSize: 11,
+                      fontSize: 10.5,
                       marginRight: 8,
+                      letterSpacing: "0.05em",
+                      textTransform: "uppercase",
+                      fontWeight: 600,
                     }}
                   >
                     {kindLabel(f.kind)}
@@ -127,15 +122,15 @@ export function ClashCard({ clash, days }: { clash: Clash; days: number }) {
                 {f.resolves_clash ? (
                   <span className="status green">resolves</span>
                 ) : (
-                  <span className="status">helps</span>
+                  <span className="status amber">helps</span>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: "#c8c8d0", marginTop: 6 }}>{f.description}</div>
+              <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 6 }}>{f.description}</div>
               <div className="row" style={{ marginTop: 8 }}>
                 <span className="meta">
                   disruption {f.disruption_score}/100 · penalty {fmtINR(f.added_penalty_inr)}
                 </span>
-                <span className="meta">
+                <span className="meta" style={{ fontVariantNumeric: "tabular-nums" }}>
                   min balance after: {fmtINR(f.resulting_min_balance_inr)}
                 </span>
               </div>

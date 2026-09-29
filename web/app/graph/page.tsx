@@ -82,16 +82,16 @@ function layout(nodes: GraphNode[], edges: GraphEdge[]): {
 }
 
 function tierFill(tier: string): string {
-  if (tier === "red") return "#3a1a1f";
-  if (tier === "amber") return "#3a2c1a";
-  if (tier === "green") return "#1c3020";
-  return "#23232c";
+  if (tier === "red") return "#2a1418";
+  if (tier === "amber") return "#2a2114";
+  if (tier === "green") return "#132318";
+  return "#17171d";
 }
 function tierStroke(tier: string): string {
   if (tier === "red") return "#ff8a95";
   if (tier === "amber") return "#ffc078";
-  if (tier === "green") return "#7ee29a";
-  return "#4a4a55";
+  if (tier === "green") return "#8fe0a8";
+  return "rgba(255,255,255,0.30)";
 }
 
 function fmtDue(iso: string | null): string {
@@ -118,11 +118,10 @@ export default async function GraphPage() {
   if (error || !data) {
     return (
       <main>
-        <h1>NEXUS</h1>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>Dependency Graph</div>
+        <h1>Nexus.</h1>
         <p className="muted">Obligation dependency graph.</p>
-        <div className="error" style={{ marginTop: 16 }}>
-          Failed to load graph. {error}
-        </div>
+        <div className="error" style={{ marginTop: 16 }}>Failed to load graph. {error}</div>
       </main>
     );
   }
@@ -131,78 +130,108 @@ export default async function GraphPage() {
   const posById = new Map(positioned.map((p) => [p.id, p]));
 
   return (
-    <main style={{ maxWidth: "none", padding: "32px 24px" }}>
-      <div style={{ maxWidth: 960, margin: "0 auto 24px" }}>
-        <h1>NEXUS</h1>
-        <p className="muted">
-          {data.count.nodes} obligations · {data.count.edges} prerequisite{data.count.edges === 1 ? "" : "s"} · click a node for details
+    <main style={{ maxWidth: "none", padding: 0 }}>
+      <div style={{ maxWidth: 900, marginBottom: 20 }}>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>Dependency Graph</div>
+        <h1>One dataset, one view.</h1>
+        <p className="muted" style={{ marginTop: 8 }}>
+          {data.count.nodes} obligations · {data.count.edges} prerequisite{data.count.edges === 1 ? "" : "s"} · click a node for details.
         </p>
       </div>
 
-      <div style={{ overflowX: "auto", background: "#0e0e13", border: "1px solid #23232c", borderRadius: 12, padding: 8 }}>
-        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Obligation graph">
-          <defs>
-            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M0,0 L10,5 L0,10 z" fill="#6a6a75" />
-            </marker>
-          </defs>
+      <div className="viz-surface" style={{ padding: 20 }}>
+        <div className="viz-header">
+          <div>
+            <div className="viz-title">Nexus · what waits on what</div>
+            <div className="viz-sub">left → right · earliest prerequisites first</div>
+          </div>
+          <div style={{ display: "flex", gap: 12 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-inv-2)" }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: "#ff8a95" }} /> Red
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-inv-2)" }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: "#ffc078" }} /> Amber
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-inv-2)" }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: "#8fe0a8" }} /> Green
+            </span>
+          </div>
+        </div>
 
-          {data.edges.map((e, i) => {
-            const a = posById.get(e.from);
-            const b = posById.get(e.to);
-            if (!a || !b) return null;
-            const x1 = a.x + NODE_W;
-            const y1 = a.y + NODE_H / 2;
-            const x2 = b.x;
-            const y2 = b.y + NODE_H / 2;
-            const mx = (x1 + x2) / 2;
-            const d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
-            return (
-              <path
-                key={`e${i}`}
-                d={d}
-                fill="none"
-                stroke="#6a6a75"
-                strokeWidth={1.5}
-                markerEnd="url(#arrow)"
-              />
-            );
-          })}
+        <div className="viz-svg-wrap">
+          <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Obligation graph">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="rgba(255,255,255,0.55)" />
+              </marker>
+            </defs>
 
-          {positioned.map((n) => {
-            const fill = tierFill(n.urgency_tier);
-            const stroke = tierStroke(n.urgency_tier);
-            return (
-              <Link key={n.id} href={`/obligation/${n.id}`}>
-                <g transform={`translate(${n.x},${n.y})`} style={{ cursor: "pointer" }}>
-                  <rect
-                    width={NODE_W}
-                    height={NODE_H}
-                    rx={8}
-                    ry={8}
-                    fill={fill}
-                    stroke={stroke}
-                    strokeWidth={1}
-                  />
-                  <text x={12} y={22} fill="#e8e8ec" fontSize={13} fontWeight={500}>
-                    {truncate(n.title, 26)}
-                  </text>
-                  <text x={12} y={40} fill="#8a8a94" fontSize={11}>
-                    {n.category ?? "uncategorised"}
-                  </text>
-                  <text x={12} y={57} fill={stroke} fontSize={11} fontWeight={500}>
-                    {fmtDue(n.due_date)}
-                  </text>
-                  {n.amount != null ? (
-                    <text x={NODE_W - 12} y={57} fill="#c8c8d0" fontSize={11} textAnchor="end">
-                      ₹{n.amount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+            {data.edges.map((e, i) => {
+              const a = posById.get(e.from);
+              const b = posById.get(e.to);
+              if (!a || !b) return null;
+              const x1 = a.x + NODE_W;
+              const y1 = a.y + NODE_H / 2;
+              const x2 = b.x;
+              const y2 = b.y + NODE_H / 2;
+              const mx = (x1 + x2) / 2;
+              const d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+              return (
+                <path
+                  key={`e${i}`}
+                  d={d}
+                  fill="none"
+                  stroke="rgba(255,255,255,0.35)"
+                  strokeWidth={1.25}
+                  markerEnd="url(#arrow)"
+                  className="line-anim"
+                  style={{ animationDelay: `${0.05 * i}s` }}
+                />
+              );
+            })}
+
+            {positioned.map((n, i) => {
+              const fill = tierFill(n.urgency_tier);
+              const stroke = tierStroke(n.urgency_tier);
+              return (
+                <Link key={n.id} href={`/obligation/${n.id}`}>
+                  <g
+                    transform={`translate(${n.x},${n.y})`}
+                    style={{
+                      cursor: "pointer",
+                      opacity: 0,
+                      animation: `card-in 0.5s var(--ease-out) ${0.05 + i * 0.04}s forwards`,
+                    }}
+                  >
+                    <rect
+                      width={NODE_W}
+                      height={NODE_H}
+                      rx={10}
+                      ry={10}
+                      fill={fill}
+                      stroke={stroke}
+                      strokeWidth={1}
+                    />
+                    <text x={14} y={22} fill="#f0f0f4" fontSize={13} fontWeight={600} letterSpacing="-0.01em">
+                      {truncate(n.title, 26)}
                     </text>
-                  ) : null}
-                </g>
-              </Link>
-            );
-          })}
-        </svg>
+                    <text x={14} y={40} fill="rgba(255,255,255,0.55)" fontSize={11} letterSpacing="0.02em">
+                      {n.category ?? "uncategorised"}
+                    </text>
+                    <text x={14} y={57} fill={stroke} fontSize={11} fontWeight={600}>
+                      {fmtDue(n.due_date)}
+                    </text>
+                    {n.amount != null ? (
+                      <text x={NODE_W - 12} y={57} fill="rgba(255,255,255,0.85)" fontSize={11} textAnchor="end" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        ₹{n.amount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                      </text>
+                    ) : null}
+                  </g>
+                </Link>
+              );
+            })}
+          </svg>
+        </div>
       </div>
     </main>
   );

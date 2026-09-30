@@ -12,12 +12,21 @@ from typing import Any
 from urllib.parse import quote
 
 import segno
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app import calendar_feed, consent, events, insights, network_log
+from app import (
+    calendar_feed,
+    consent,
+    data_export,
+    events,
+    insights,
+    knowledge_pack,
+    license as license_mod,
+    network_log,
+)
 from app.clock import today as clock_today
 from app.config import settings
 from app.db.models import ConsentLog, Obligation
@@ -257,6 +266,67 @@ def proposal_current() -> dict[str, Any] | None:
 @router.post("/api/voice/turn")
 def voice_turn(payload: VoiceTurn, db: Session = Depends(get_db)) -> dict[str, Any]:
     return consent.handle_turn(db, USER, payload.text, payload.proposal_id)
+
+
+@router.post("/api/voice/transcribe")
+async def voice_transcribe(audio: UploadFile = File(...)) -> dict[str, Any]:
+    """Push-to-talk STT endpoint. Accepts a browser MediaRecorder blob
+    (webm/opus by default), returns the transcribed text.
+
+    Runs faster-whisper `base.en` locally on CPU — no audio ever leaves the box.
+    """
+    from app.voice_stt import transcribe as stt_transcribe
+
+    data = await audio.read()
+    if len(data) < 1024:
+        return {"ok": False, "text": "", "reason": "empty"}
+    try:
+        text = stt_transcribe(data)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"stt failed: {e}") from e
+    return {"ok": True, "text": text, "bytes": len(data)}
+
+
+class EraseRequest(BaseModel):
+    confirm: str = Field(..., description="Must equal 'YES-DELETE-EVERYTHING' to proceed.")
+
+
+@router.get("/api/user/export")
+def user_export(db: Session = Depends(get_db)) -> Response:
+    """Download every row Chaufferone stores about this user (§7.4 data portability)."""
+    import json as _json
+
+    payload = data_export.export_all(db, USER)
+    body = _json.dumps(payload, indent=2, default=str)
+    return Response(
+        content=body,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="chaufferone-export.json"'},
+    )
+
+
+@router.post("/api/user/delete-all")
+def user_delete_all(req: EraseRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Erase everything for this user. Irreversible. Requires confirm='YES-DELETE-EVERYTHING'."""
+    if req.confirm != data_export.ERASE_CONFIRM:
+        raise HTTPException(400, f"confirm must equal '{data_export.ERASE_CONFIRM}'")
+    consent.clear_proposal(USER)
+    events.clear()
+    counts = data_export.erase_all(db, USER)
+    events.publish("erased", {"user_id": USER, **counts})
+    return {"ok": True, **counts}
+
+
+@router.get("/api/knowledge/status")
+def knowledge_status() -> dict[str, Any]:
+    """Which knowledge packs are installed, and their versions (§7.6 update stream)."""
+    return {"packs": knowledge_pack.status()}
+
+
+@router.get("/api/license/status")
+def license_status() -> dict[str, Any]:
+    """Signed Ed25519 license state (§7.5). No phone-home; verified offline."""
+    return license_mod.status()
 
 
 @router.get("/api/insights")

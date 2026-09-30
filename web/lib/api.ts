@@ -21,11 +21,21 @@ export type Obligation = {
   sources?: ObligationSource[];
 };
 
+// Prefer NEXT_PUBLIC_BACKEND_URL (available in browser + server). Falls back to
+// the server-only CHAUFFERONE_BACKEND_URL, then localhost. When a public URL is
+// set, browser calls go absolute cross-origin (backend must allow the deployed
+// frontend origin via ALLOWED_ORIGINS). When unset, browser uses relative paths
+// and relies on Next's rewrite fallback (local dev).
+const PUBLIC_BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
 const SERVER_BACKEND =
-  process.env.CHAUFFERONE_BACKEND_URL ?? "http://127.0.0.1:8000";
+  PUBLIC_BACKEND ||
+  process.env.CHAUFFERONE_BACKEND_URL ||
+  "http://127.0.0.1:8000";
 
 function resolve(path: string): string {
-  if (typeof window !== "undefined") return path;
+  if (typeof window !== "undefined") {
+    return PUBLIC_BACKEND ? `${PUBLIC_BACKEND}${path}` : path;
+  }
   return `${SERVER_BACKEND}${path}`;
 }
 
@@ -173,6 +183,56 @@ export type NetworkLog = {
 
 export type SampleSms = { pre_debit: string; debit: string };
 
+export type Proposal = {
+  proposal_id: string;
+  status: "open" | "accepted" | "declined" | string;
+  speech: string;
+  clash: Record<string, unknown>;
+  options: Record<string, unknown>[];
+  trigger_id: string | null;
+  created_at: string;
+};
+
+export type LicenseStatus = {
+  status: "active" | "expired_updates" | "invalid_signature" | "no_public_key" | "community" | "malformed" | string;
+  plan: string | null;
+  user_id: string | null;
+  updates_until: string | null;
+  issued_at: string | null;
+  reason: string | null;
+  receives_updates: boolean;
+};
+
+export type KnowledgePack = {
+  name: string;
+  version: string;
+  country: string;
+  description: string;
+  templates_installed: number;
+  templates_updated: number;
+};
+
+export type EraseResult = {
+  ok: boolean;
+  obligations_deleted: number;
+  edges_deleted: number;
+  signals_deleted: number;
+  documents_deleted: number;
+  consent_log_deleted: number;
+  vendor_patterns_deleted: number;
+  history_deleted: number;
+  preferences_deleted: number;
+};
+
+export type VoiceTurnResult = {
+  speech: string;
+  intent: string;
+  parsed_by: "rules" | "llm" | string;
+  applied_moves: Record<string, unknown>[];
+  plan_changed: boolean;
+  proposal_id: string | null;
+};
+
 export const api = {
   health: () => jsonFetch<{ status: string; product: string }>("/health"),
   timeline: () => jsonFetch<Obligation[]>("/api/timeline"),
@@ -188,6 +248,22 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ from, text }),
+    }),
+  licenseStatus: () => jsonFetch<LicenseStatus>("/api/license/status"),
+  knowledgeStatus: () => jsonFetch<{ packs: KnowledgePack[] }>("/api/knowledge/status"),
+  exportUrl: () => "/api/user/export",
+  deleteAll: (confirm: string) =>
+    jsonFetch<EraseResult>("/api/user/delete-all", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm }),
+    }),
+  proposalCurrent: () => jsonFetch<Proposal | null>("/api/proposal/current"),
+  voiceTurn: (text: string, proposalId?: string | null) =>
+    jsonFetch<VoiceTurnResult>("/api/voice/turn", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, proposal_id: proposalId ?? null }),
     }),
   obligation: (id: string) => jsonFetch<Obligation>(`/api/obligation/${id}`),
   graph: () => jsonFetch<GraphResponse>("/api/graph"),

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { api, type Obligation } from "@/lib/api";
+import { VoicePanel } from "@/components/VoicePanel";
 import { DemoStrip } from "@/components/DemoStrip";
+import { VoiceConsent } from "@/components/VoiceConsent";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +95,7 @@ export default async function DashboardPage() {
       ) : null}
 
       {health ? <DemoStrip /> : null}
+      {health ? <VoiceConsent /> : null}
 
       <div className="kpi-grid">
         <div className="kpi kpi-dark">
@@ -143,6 +146,8 @@ export default async function DashboardPage() {
           </div>
         </div>
       </div>
+
+      <VoicePanel />
 
       <div className="panels">
         <div className="panel">

@@ -250,6 +250,67 @@ async def ingest_sms(request: Request, db: Session = Depends(get_db)) -> dict[st
     return await run_in_threadpool(ingest_sms_payload, db, payload)
 
 
+# --- 1b. Debug echo: proves any HTTP client can reach us & shows what it sends --
+
+from collections import deque
+from datetime import datetime as _dt
+
+_echo_hits: deque[dict[str, Any]] = deque(maxlen=50)
+
+
+def _capture_hit(request: Request, raw: bytes, body_text: str, parsed_json: Any) -> dict[str, Any]:
+    hit = {
+        "at": _dt.utcnow().isoformat(timespec="seconds") + "Z",
+        "method": request.method,
+        "peer": request.client.host if request.client else None,
+        "headers": {
+            k: v for k, v in request.headers.items() if k.lower() not in {"authorization", "cookie"}
+        },
+        "query_params": dict(request.query_params),
+        "body_length": len(raw),
+        "body_text": body_text[:2000],
+        "body_json": parsed_json,
+    }
+    _echo_hits.appendleft(hit)
+    return hit
+
+
+async def _echo_response(request: Request) -> dict[str, Any]:
+    raw = await request.body()
+    body_text = raw.decode("utf-8", errors="replace")
+    try:
+        parsed_json = json.loads(body_text) if body_text.strip() else None
+    except ValueError:
+        parsed_json = None
+    hit = _capture_hit(request, raw, body_text, parsed_json)
+    log.info("echo: method=%s peer=%s body=%r", request.method, hit["peer"], body_text[:500])
+    return {"ok": True, "hint": "Delivered. Reload /api/ingest/echo/recent to see it.", **hit}
+
+
+@router.post("/echo")
+async def ingest_echo(request: Request) -> dict[str, Any]:
+    """Echo back what an SMS-forwarder app actually sends."""
+    return await _echo_response(request)
+
+
+@router.get("/echo")
+async def ingest_echo_get(request: Request) -> dict[str, Any]:
+    """Accept GET too - some forwarders only send GETs to test connectivity."""
+    return await _echo_response(request)
+
+
+@router.get("/echo/recent")
+def ingest_echo_recent() -> dict[str, Any]:
+    """View the last 50 hits without any live terminal access. Open in a browser."""
+    return {"count": len(_echo_hits), "hits": list(_echo_hits)}
+
+
+@router.post("/echo/clear")
+def ingest_echo_clear() -> dict[str, Any]:
+    _echo_hits.clear()
+    return {"cleared": True}
+
+
 # --- 2. SMS Backup & Restore XML -------------------------------------------------
 
 

@@ -25,6 +25,7 @@ dependencies = [
     "python-multipart>=0.0.20",
     "networkx>=3.4",
     "segno>=1.6",
+    "faster-whisper>=1.0",
 ]
 
 [dependency-groups]

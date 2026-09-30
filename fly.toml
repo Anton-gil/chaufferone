@@ -1,0 +1,42 @@
+# Fly.io deployment config for Chaufferone backend.
+# Rename `app` after `fly launch --no-deploy` — Fly will pick a globally unique name for you.
+
+app = "chauferrone-api"
+primary_region = "sin"   # Singapore — closest to India users; change if you're elsewhere.
+
+[build]
+  # Uses the repo-root Dockerfile.
+
+[env]
+  PORT = "8000"
+  # GOOGLE_REDIRECT_URI, GOOGLE_CLIENT_ID/SECRET, GROQ_API_KEY, ALLOWED_ORIGINS
+  # are set via `fly secrets set ...` — never here (this file is committed).
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"    # scale to zero when idle (free tier friendly)
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 200
+    soft_limit = 100
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+# Persistent SQLite + Google OAuth token.
+[[mounts]]
+  source = "chauferrone_data"
+  destination = "/app/data"
+  initial_size = "1gb"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

@@ -75,19 +75,24 @@ def ingest_gmail(
         raise HTTPException(401, "Not authorized. Visit /api/auth/google/start first.")
 
     messages = list_and_fetch(creds, days=days, max_results=max_results)
-    stats = {"scanned": len(messages), "created": 0, "merged": 0, "skipped": 0, "signals": 0}
+    stats = {"scanned": len(messages), "created": 0, "merged": 0, "skipped": 0, "signals": 0, "errors": 0}
     user_id = settings.default_user_id
 
     for m in messages:
-        result = process_message(
-            db,
-            user_id=user_id,
-            source_type="gmail",
-            source_ref=m.id,
-            body=m.body_text,
-            subject=m.subject,
-            received_at=m.received_at.date(),
-        )
+        try:
+            result = process_message(
+                db,
+                user_id=user_id,
+                source_type="gmail",
+                source_ref=m.id,
+                body=m.body_text,
+                subject=m.subject,
+                received_at=m.received_at.date(),
+            )
+        except Exception:
+            db.rollback()
+            stats["errors"] += 1
+            continue
         if result.reason.startswith("signal:"):
             stats["signals"] += 1
         elif result.was_new:

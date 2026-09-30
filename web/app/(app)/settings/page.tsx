@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type Preferences, type PreferencesUpdate } from "@/lib/api";
+import { api, type KnowledgePack, type LicenseStatus, type Preferences, type PreferencesUpdate } from "@/lib/api";
+
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
 type FormState = {
   hard_floor_inr: string;
@@ -85,16 +87,43 @@ export default function SettingsPage() {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const [running, setRunning] = useState<null | "ingest" | "seed" | "reset">(null);
+  const [running, setRunning] = useState<null | "ingest" | "seed" | "reset" | "erase">(null);
   const [message, setMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [license, setLicense] = useState<LicenseStatus | null>(null);
+  const [packs, setPacks] = useState<KnowledgePack[] | null>(null);
 
   useEffect(() => {
     api
       .preferences()
       .then((p) => setForm(toForm(p)))
       .catch((e: Error) => setLoadError(e.message));
+    api.licenseStatus().then(setLicense).catch(() => {});
+    api.knowledgeStatus().then((k) => setPacks(k.packs)).catch(() => {});
   }, []);
+
+  async function runErase() {
+    const answer = prompt(
+      "This deletes every obligation, edge, signal, document, consent record and preference. Type YES-DELETE-EVERYTHING to confirm.",
+    );
+    if (answer !== "YES-DELETE-EVERYTHING") {
+      setMessage("Erase cancelled.");
+      return;
+    }
+    setRunning("erase");
+    setMessage(null);
+    setActionError(null);
+    try {
+      const r = await api.deleteAll("YES-DELETE-EVERYTHING");
+      setMessage(
+        `Erased ${r.obligations_deleted} obligations, ${r.edges_deleted} edges, ${r.signals_deleted} signals, ${r.consent_log_deleted} consent records, ${r.preferences_deleted} preferences.`,
+      );
+    } catch (e) {
+      setActionError((e as Error).message);
+    } finally {
+      setRunning(null);
+    }
+  }
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => (f ? { ...f, [k]: v } : f));
@@ -227,7 +256,10 @@ export default function SettingsPage() {
           Connect your inbox so Chaufferone can extract obligations. OAuth only, read-only scope.
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <a href="http://localhost:8000/api/auth/google/start" style={{ ...btnGhost, textDecoration: "none", display: "inline-block" }}>
+          <a
+            href={`${process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000"}/api/auth/google/start`}
+            style={{ ...btnGhost, textDecoration: "none", display: "inline-block" }}
+          >
             Connect Gmail
           </a>
           <button type="button" onClick={runIngest} disabled={running !== null} style={btnPrimary}>
@@ -258,6 +290,99 @@ export default function SettingsPage() {
             style={btnPrimary}
           >
             Copy subscribe URL
+          </button>
+        </div>
+      </div>
+
+      <h2>License</h2>
+      <div className="card">
+        {!license ? (
+          <p className="muted" style={{ marginTop: 0 }}>Checking…</p>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+              <span
+                style={{
+                  background: license.status === "active" ? "#0e2a17" : "#2a1017",
+                  color: license.status === "active" ? "#7ee29a" : "#ff8a95",
+                  border: `1px solid ${license.status === "active" ? "#1c4d2c" : "#4d1a22"}`,
+                  padding: "2px 8px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.6,
+                }}
+              >
+                {license.status.replace("_", " ")}
+              </span>
+              {license.plan ? <span className="muted" style={{ fontSize: 13 }}>{license.plan}</span> : null}
+            </div>
+            {license.user_id ? (
+              <div className="muted" style={{ fontSize: 13 }}>Licensed to {license.user_id}</div>
+            ) : null}
+            {license.updates_until ? (
+              <div className="muted" style={{ fontSize: 13 }}>Updates through {license.updates_until}</div>
+            ) : null}
+            {license.reason ? <div className="muted" style={{ fontSize: 13, marginTop: 6 }}>{license.reason}</div> : null}
+            <p className="muted" style={{ marginTop: 10, marginBottom: 0, fontSize: 12 }}>
+              Ed25519 signature verified locally against the embedded public key. No phone-home.
+            </p>
+          </>
+        )}
+      </div>
+
+      <h2>Knowledge packs</h2>
+      <div className="card">
+        {!packs ? (
+          <p className="muted" style={{ marginTop: 0 }}>Checking…</p>
+        ) : packs.length === 0 ? (
+          <p className="muted" style={{ marginTop: 0 }}>No knowledge packs loaded.</p>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ textAlign: "left", color: "#8a8a94" }}>
+                <th style={{ padding: "4px 0" }}>Pack</th>
+                <th style={{ padding: "4px 0" }}>Version</th>
+                <th style={{ padding: "4px 0" }}>Country</th>
+                <th style={{ padding: "4px 0", textAlign: "right" }}>Rules</th>
+              </tr>
+            </thead>
+            <tbody>
+              {packs.map((p) => (
+                <tr key={p.name} style={{ borderTop: "1px solid #1a1a20" }}>
+                  <td style={{ padding: "6px 0" }}>{p.name} <span className="muted" style={{ fontSize: 12 }}>· {p.description}</span></td>
+                  <td style={{ padding: "6px 0", color: "#a0a0aa" }}>{p.version}</td>
+                  <td style={{ padding: "6px 0", color: "#a0a0aa" }}>{p.country}</td>
+                  <td style={{ padding: "6px 0", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                    +{p.templates_installed} / Δ{p.templates_updated}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <h2>Your data</h2>
+      <div className="card">
+        <p className="muted" style={{ marginTop: 0 }}>
+          One-tap export of everything Chaufferone stores about you (DPDP §11 data portability). Erase everything
+          in one action (DPDP §12 right to be forgotten). Both work offline.
+        </p>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <a
+            href={`${BACKEND}/api/user/export`}
+            style={{ ...btnGhost, textDecoration: "none", display: "inline-block" }}
+          >
+            Export everything (.json)
+          </a>
+          <button
+            type="button"
+            onClick={runErase}
+            disabled={running !== null}
+            style={{ ...btnGhost, color: "#ff8a95", borderColor: "#3a1a1f" }}
+          >
+            {running === "erase" ? "Erasing…" : "Erase everything"}
           </button>
         </div>
       </div>
